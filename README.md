@@ -6,7 +6,7 @@
 
 一个为长篇中文小说设计的 Windows EPUB 阅读器：轻量、单文件、完全离线。
 
-> **下载**：[最新版 `墨阅.exe`](https://github.com/Lossalt/moyue/releases/latest)（单文件，约 16 MB，无需安装）
+> **下载**：[最新版 `MoYue.exe`](https://github.com/Lossalt/moyue/releases/latest)（单文件，约 16 MB，无需安装）
 
 ![阅读界面](docs/reading.png)
 
