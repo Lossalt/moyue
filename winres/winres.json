@@ -1,0 +1,45 @@
+{
+  "RT_GROUP_ICON": {
+    "#1": {
+      "0000": [
+        "icon_256.png",
+        "icon_128.png",
+        "icon_64.png",
+        "icon_48.png",
+        "icon_40.png",
+        "icon_32.png",
+        "icon_24.png",
+        "icon_20.png",
+        "icon_16.png"
+      ]
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": "app.manifest"
+    }
+  },
+  "RT_VERSION": {
+    "#1": {
+      "0000": {
+        "fixed": {
+          "file_version": "1.0.0.0",
+          "product_version": "1.0.0.0"
+        },
+        "info": {
+          "0409": {
+            "Comments": "轻量、单文件的 EPUB 小说阅读器",
+            "CompanyName": "MoYue",
+            "FileDescription": "墨阅 · 轻量 EPUB 小说阅读器",
+            "FileVersion": "1.0.0.0",
+            "InternalName": "MoYue",
+            "LegalCopyright": "字体以 SIL Open Font License 1.1 授权",
+            "OriginalFilename": "墨阅.exe",
+            "ProductName": "墨阅",
+            "ProductVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  }
+}

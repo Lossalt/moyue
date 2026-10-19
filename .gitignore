@@ -1,0 +1,7 @@
+/.winetest/
+/.gopath/
+/.gocache/
+/.venv/
+/dist/
+/rsrc_windows_*.syso
+*.log
