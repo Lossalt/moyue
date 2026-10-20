@@ -5,3 +5,8 @@
 /dist/
 /rsrc_windows_*.syso
 *.log
+/android/build/
+/android/.keystore/
+/.android-keystore/
+*.jks
+*.apk
