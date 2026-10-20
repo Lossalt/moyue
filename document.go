@@ -15,6 +15,7 @@ type PositionedBlock struct {
 	Start, End int32
 	Kind       BlockKind
 	Align      Align
+	ImageIndex int
 	Runs       []PositionedRun
 }
 
@@ -32,6 +33,9 @@ func BuildDocument(book *Book) *Document {
 	d := &Document{Text: make([]uint16, 0, 1<<20)}
 
 	// Title page ---------------------------------------------------------
+	if book.CoverIndex >= 0 && book.CoverIndex < len(book.Images) {
+		d.appendBlockEx(KindImage, AlignCenter, []Run{{Text: "〔封面 · 点击查看〕"}}, book.CoverIndex)
+	}
 	d.appendBlock(KindTitlePage, AlignCenter, []Run{{Text: book.Title}})
 	d.appendBlock(KindAuthor, AlignCenter, []Run{{Text: book.Author}})
 	d.appendBlock(KindDivider, AlignCenter, []Run{{Text: "· · ·"}})
@@ -47,7 +51,7 @@ func BuildDocument(book *Book) *Document {
 			if strings.TrimSpace(strings.ReplaceAll(b.Text(), string(lineBreakSentinel), "")) == "" {
 				continue
 			}
-			d.appendBlock(b.Kind, b.Align, b.Runs)
+			d.appendBlockEx(b.Kind, b.Align, b.Runs, b.ImageIndex)
 		}
 		ch.End = d.Length
 		d.Chapters = append(d.Chapters, ch)
@@ -68,8 +72,12 @@ func BuildDocument(book *Book) *Document {
 }
 
 func (d *Document) appendBlock(kind BlockKind, align Align, runs []Run) {
+	d.appendBlockEx(kind, align, runs, -1)
+}
+
+func (d *Document) appendBlockEx(kind BlockKind, align Align, runs []Run, imageIndex int) {
 	start := int32(len(d.Text))
-	pb := PositionedBlock{Start: start, Kind: kind, Align: align}
+	pb := PositionedBlock{Start: start, Kind: kind, Align: align, ImageIndex: imageIndex}
 	for _, r := range runs {
 		t := strings.ReplaceAll(r.Text, string(lineBreakSentinel), "\v")
 		t = strings.ReplaceAll(t, "\r", "")
@@ -88,6 +96,16 @@ func (d *Document) appendBlock(kind BlockKind, align Align, runs []Run) {
 	pb.End = int32(len(d.Text))
 	d.Length = pb.End
 	d.Blocks = append(d.Blocks, pb)
+}
+
+// ImageAt returns the image shown by the block containing pos, or -1.
+func (d *Document) ImageAt(pos int32) int {
+	for _, pb := range d.Blocks {
+		if pb.Kind == KindImage && pos >= pb.Start && pos < pb.End {
+			return pb.ImageIndex
+		}
+	}
+	return -1
 }
 
 func (d *Document) ChapterAt(pos int32) int {

@@ -19,6 +19,18 @@ func (a *App) layout() {
 	if rectWidth(cr) <= 0 || rectHeight(cr) <= 0 {
 		return
 	}
+	if a.viewerActive {
+		if a.rich != 0 {
+			procShowWindow.Call(a.rich, SW_HIDE)
+		}
+		if a.toc != 0 {
+			procShowWindow.Call(a.toc, SW_HIDE)
+		}
+		a.buttons = nil
+		a.welcomeButtons = nil
+		a.viewerLayout(cr)
+		return
+	}
 	top := 0
 	bottom := rectHeight(cr)
 	if !a.fullscreen {
@@ -138,6 +150,10 @@ func (a *App) layoutWelcome(cr RECT, top, bottom int) {
 }
 
 func (a *App) paint(hdc uintptr, cr RECT) {
+	if a.viewerActive {
+		a.paintImageViewer(hdc, cr)
+		return
+	}
 	fillRect(hdc, cr, a.theme.Paper)
 	if !a.fullscreen {
 		a.paintToolbar(hdc, cr)

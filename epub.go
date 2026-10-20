@@ -35,6 +35,7 @@ const (
 	KindHeading3
 	KindQuote
 	KindDivider
+	KindImage
 )
 
 type Align int
@@ -51,9 +52,12 @@ type Run struct {
 }
 
 type Block struct {
-	Runs  []Run     `json:"runs"`
-	Kind  BlockKind `json:"kind"`
-	Align Align     `json:"align,omitempty"`
+	Runs       []Run     `json:"runs"`
+	Kind       BlockKind `json:"kind"`
+	Align      Align     `json:"align,omitempty"`
+	ImageSrc   string    `json:"-"`
+	ImageAlt   string    `json:"-"`
+	ImageIndex int       `json:"-"`
 }
 
 func (b Block) Text() string {
@@ -75,13 +79,22 @@ type Chapter struct {
 	End   int32 `json:"-"`
 }
 
+type ImageAsset struct {
+	Href      string
+	MediaType string
+	Alt       string
+	Data      []byte
+}
+
 type Book struct {
-	Path      string
-	Title     string
-	Author    string
-	Language  string
-	Chapters  []Chapter
-	CoverHref string
+	Path       string
+	Title      string
+	Author     string
+	Language   string
+	Chapters   []Chapter
+	CoverHref  string
+	CoverIndex int
+	Images     []ImageAsset
 }
 
 // ---------------------------------------------------------------------------
@@ -256,10 +269,14 @@ func sanitizeXML(s string) string {
 
 type opfPackage struct {
 	Metadata struct {
-		Title    string   `xml:"title"`
-		Creators []string `xml:"creator"`
-		Language string   `xml:"language"`
+		Title    string    `xml:"title"`
+		Creators []string  `xml:"creator"`
+		Language string    `xml:"language"`
+		Meta     []opfMeta `xml:"meta"`
 	} `xml:"metadata"`
+	Guide struct {
+		References []opfGuideRef `xml:"reference"`
+	} `xml:"guide"`
 	Manifest struct {
 		Items []opfItem `xml:"item"`
 	} `xml:"manifest"`
@@ -279,6 +296,16 @@ type opfItem struct {
 type opfRef struct {
 	IDRef  string `xml:"idref,attr"`
 	Linear string `xml:"linear,attr"`
+}
+
+type opfMeta struct {
+	Name    string `xml:"name,attr"`
+	Content string `xml:"content,attr"`
+}
+
+type opfGuideRef struct {
+	Type string `xml:"type,attr"`
+	Href string `xml:"href,attr"`
 }
 
 type tocItem struct {
@@ -491,6 +518,11 @@ func LoadEPUB(name string) (*Book, error) {
 		}
 	}
 
+	itemsByHref := make(map[string]opfItem, len(items))
+	for _, it := range items {
+		itemsByHref[it.Href] = it
+	}
+
 	var toc []tocItem
 	if navItem != nil {
 		if raw, err := a.read(navItem.Href); err == nil {
@@ -528,16 +560,101 @@ func LoadEPUB(name string) (*Book, error) {
 	}
 
 	book := &Book{
-		Path:     name,
-		Title:    strings.TrimSpace(opf.Metadata.Title),
-		Author:   strings.TrimSpace(strings.Join(opf.Metadata.Creators, "、")),
-		Language: strings.TrimSpace(opf.Metadata.Language),
+		Path:       name,
+		Title:      strings.TrimSpace(opf.Metadata.Title),
+		Author:     strings.TrimSpace(strings.Join(opf.Metadata.Creators, "、")),
+		Language:   strings.TrimSpace(opf.Metadata.Language),
+		CoverIndex: -1,
 	}
 	if book.Title == "" {
 		book.Title = strings.TrimSuffix(path.Base(name), path.Ext(name))
 	}
 	if book.Author == "" {
 		book.Author = "佚名"
+	}
+
+	// Locate an optional cover. EPUB 3 usually marks the image item with
+	// properties="cover-image"; EPUB 2 uses <meta name="cover" content="id">
+	// or a guide reference to a cover XHTML page.
+	coverHref := ""
+	for _, m := range opf.Metadata.Meta {
+		if !strings.EqualFold(strings.TrimSpace(m.Name), "cover") {
+			continue
+		}
+		if it, ok := items[strings.TrimSpace(m.Content)]; ok && isImagePath(it.Href) {
+			coverHref = it.Href
+			break
+		}
+	}
+	if coverHref == "" {
+		for _, it := range items {
+			if strings.Contains(strings.ToLower(it.Properties), "cover-image") && isImagePath(it.Href) {
+				coverHref = it.Href
+				break
+			}
+		}
+	}
+	if coverHref == "" {
+		for _, ref := range opf.Guide.References {
+			if !strings.Contains(strings.ToLower(ref.Type), "cover") || strings.TrimSpace(ref.Href) == "" {
+				continue
+			}
+			href := resolvePath(opfPath, ref.Href, false)
+			if isImagePath(href) {
+				coverHref = href
+				break
+			}
+			if raw, err := a.read(href); err == nil {
+				if text, err := decodeMarkup(raw); err == nil {
+					if img := firstImageInHTML([]byte(text), href); img != "" {
+						coverHref = img
+						break
+					}
+				}
+			}
+		}
+	}
+
+	imageByHref := make(map[string]int)
+	imageBytes := 0
+	loadImage := func(href, alt string) int {
+		href = normalizeZipPath(href)
+		if href == "" {
+			return -1
+		}
+		if idx, ok := imageByHref[href]; ok {
+			if alt != "" && book.Images[idx].Alt == "" {
+				book.Images[idx].Alt = alt
+			}
+			return idx
+		}
+		f, real, ok := a.find(href)
+		if !ok || f.UncompressedSize64 > 32<<20 {
+			return -1
+		}
+		data, err := a.read(real)
+		if err != nil || len(data) == 0 || imageBytes+len(data) > 96<<20 {
+			return -1
+		}
+		media := ""
+		if it, ok := itemsByHref[real]; ok {
+			media = it.MediaType
+		}
+		media = mediaTypeForImage(real, media)
+		if alt == "" {
+			alt = "插图"
+		}
+		imageBytes += len(data)
+		idx := len(book.Images)
+		book.Images = append(book.Images, ImageAsset{Href: real, MediaType: media, Alt: alt, Data: data})
+		imageByHref[real] = idx
+		return idx
+	}
+	if coverHref != "" {
+		if idx := loadImage(coverHref, "封面"); idx >= 0 {
+			book.CoverIndex = idx
+			book.CoverHref = book.Images[idx].Href
+		}
 	}
 
 	seen := make(map[string]bool)
@@ -568,6 +685,21 @@ func LoadEPUB(name string) (*Book, error) {
 		blocks, heading, docTitle := parseContent([]byte(text))
 		if len(blocks) == 0 {
 			continue
+		}
+		for bi := range blocks {
+			if blocks[bi].Kind != KindImage {
+				continue
+			}
+			src := resolvePath(it.Href, blocks[bi].ImageSrc, false)
+			idx := loadImage(src, blocks[bi].ImageAlt)
+			if idx < 0 {
+				blocks[bi].Kind = KindBody
+				blocks[bi].Align = AlignCenter
+				blocks[bi].Runs = []Run{{Text: "〔插图无法显示〕"}}
+				continue
+			}
+			blocks[bi].ImageIndex = idx
+			blocks[bi].Runs = []Run{{Text: imagePlaceholder(idx, blocks[bi].ImageAlt)}}
 		}
 		chapterNo++
 		t, hasTOC := tocByFile[it.Href]
@@ -606,16 +738,63 @@ func LoadEPUB(name string) (*Book, error) {
 		return nil, errors.New("没有找到可显示的正文（EPUB 可能使用了不支持的版式）")
 	}
 
-	// A cover is optional. It is only remembered for the welcome screen.
-	for _, it := range opf.Manifest.Items {
-		if strings.Contains(strings.ToLower(it.Properties), "cover-image") {
-			book.CoverHref = it.Href
-			break
-		}
-	}
 	return book, nil
 }
 
 func isHeadingKind(k BlockKind) bool {
 	return k == KindHeading1 || k == KindHeading2 || k == KindHeading3
+}
+
+func isImagePath(href string) bool {
+	switch strings.ToLower(path.Ext(href)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".avif":
+		return true
+	}
+	return false
+}
+
+func mediaTypeForImage(href, declared string) string {
+	declared = strings.ToLower(strings.TrimSpace(declared))
+	if strings.HasPrefix(declared, "image/") {
+		return declared
+	}
+	switch strings.ToLower(path.Ext(href)) {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	case ".bmp":
+		return "image/bmp"
+	case ".svg":
+		return "image/svg+xml"
+	}
+	return "application/octet-stream"
+}
+
+func firstImageInHTML(data []byte, baseFile string) string {
+	doc, err := parseHTMLDocument(data)
+	if err != nil {
+		return ""
+	}
+	img := findElement(doc, "img")
+	if img == nil {
+		return ""
+	}
+	return resolvePath(baseFile, attrValue(img, "src"), false)
+}
+
+func imagePlaceholder(index int, alt string) string {
+	alt = strings.TrimSpace(alt)
+	if alt == "" || alt == "插图" {
+		return fmt.Sprintf("〔插图 %d · 点击查看〕", index+1)
+	}
+	r := []rune(alt)
+	if len(r) > 16 {
+		alt = string(r[:16]) + "…"
+	}
+	return fmt.Sprintf("〔插图 %d · %s〕", index+1, alt)
 }

@@ -32,10 +32,11 @@ type uiButton struct {
 }
 
 type loadResult struct {
-	book *Book
-	err  error
-	path string
-	seq  int
+	book      *Book
+	err       error
+	path      string
+	seq       int
+	showCover bool
 }
 
 type App struct {
@@ -82,6 +83,19 @@ type App struct {
 	menuItemH   int
 	menuSepH    int
 	menuClosing bool
+
+	viewerActive  bool
+	viewerIndex   int
+	viewerOpening bool
+	viewerImage   *renderedImage
+	viewerErr     string
+	viewerClose   RECT
+	viewerPrev    RECT
+	viewerNext    RECT
+	imageCache    map[int]*renderedImage
+	richDown      bool
+	richDownX     int
+	richDownY     int
 
 	dialogActive bool
 	dialogTitle  string
@@ -135,6 +149,11 @@ const (
 	idEscape
 	idDialogOK
 	idDialogClose
+	idCover
+	idGallery
+	idViewerClose
+	idViewerPrev
+	idViewerNext
 )
 
 const (
@@ -318,7 +337,7 @@ func (a *App) create() bool {
 	if len(os.Args) > 1 {
 		p := strings.TrimSpace(os.Args[1])
 		if p != "" && !strings.HasPrefix(p, "-") {
-			a.openBook(p)
+			a.openBook(p, true)
 		}
 	}
 	return true
@@ -409,6 +428,17 @@ func mainWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		a.onPaint()
 		return 0
 	case WM_KEYDOWN:
+		if a.viewerActive {
+			switch wParam {
+			case 0x1B, 0x0D, 0x20:
+				a.closeImageViewer()
+			case 0x25:
+				a.stepImageViewer(-1)
+			case 0x27:
+				a.stepImageViewer(1)
+			}
+			return 0
+		}
 		if a.dialogActive {
 			if wParam == 0x1B || wParam == 0x0D || wParam == 0x20 {
 				a.dismissDialog()
@@ -554,6 +584,31 @@ func richWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 					return 0
 				}
 			}
+		case WM_LBUTTONDOWN:
+			a.richDown = true
+			a.richDownX = int(loword(lParam))
+			a.richDownY = int(hiword(lParam))
+		case WM_LBUTTONUP:
+			if a.richDown && !a.viewerActive && !a.dialogActive && a.doc != nil {
+				x, y := int(loword(lParam)), int(hiword(lParam))
+				dx, dy := x-a.richDownX, y-a.richDownY
+				if dx*dx+dy*dy <= 16 {
+					pt := POINT{X: int32(x), Y: int32(y)}
+					pos := int32(send(a.rich, EM_CHARFROMPOS, 0, uintptr(unsafe.Pointer(&pt))))
+					idx := a.doc.ImageAt(pos)
+					if idx < 0 {
+						// Some RichEdit versions pack line/character into the
+						// return value; retry with the low word.
+						idx = a.doc.ImageAt(pos & 0xFFFF)
+					}
+					if idx >= 0 {
+						a.richDown = false
+						a.showImageViewer(idx, false)
+						return 0
+					}
+				}
+			}
+			a.richDown = false
 		case WM_KEYDOWN:
 			if id := a.shortcutFor(wParam); id != 0 {
 				a.handleCommand(id)
@@ -697,6 +752,17 @@ func (a *App) onTimer() {
 }
 
 func (a *App) hitTest(x, y int) int {
+	if a.viewerActive {
+		switch {
+		case pointIn(a.viewerClose, x, y):
+			return idViewerClose
+		case pointIn(a.viewerPrev, x, y):
+			return idViewerPrev
+		case pointIn(a.viewerNext, x, y):
+			return idViewerNext
+		}
+		return 0
+	}
 	for _, b := range a.buttons {
 		if pointIn(b.Rect, x, y) {
 			return b.ID
@@ -729,6 +795,24 @@ func (a *App) handleCommand(id int) {
 		}
 	case id == idTOC:
 		a.toggleTOC()
+	case id == idCover:
+		if a.book != nil && a.book.CoverIndex >= 0 {
+			a.showImageViewer(a.book.CoverIndex, false)
+		}
+	case id == idGallery:
+		if a.book != nil && len(a.book.Images) > 0 {
+			start := 0
+			if a.book.CoverIndex >= 0 {
+				start = a.book.CoverIndex
+			}
+			a.showImageViewer(start, false)
+		}
+	case id == idViewerClose:
+		a.closeImageViewer()
+	case id == idViewerPrev:
+		a.stepImageViewer(-1)
+	case id == idViewerNext:
+		a.stepImageViewer(1)
 	case id == idFontMenu:
 		a.showFontMenu()
 	case id == idFontSerif:
@@ -762,7 +846,9 @@ func (a *App) handleCommand(id int) {
 	case id == idFullscreen:
 		a.toggleFullscreen()
 	case id == idEscape:
-		if a.fullscreen {
+		if a.viewerActive {
+			a.closeImageViewer()
+		} else if a.fullscreen {
 			a.toggleFullscreen()
 		}
 	case id >= idLineBase && id < idLineBase+len(lineOptions):
@@ -925,7 +1011,7 @@ func (a *App) openDialog() {
 	if abs, err := filepath.Abs(p); err == nil {
 		p = abs
 	}
-	a.openBook(p)
+	a.openBook(p, true)
 }
 
 func (a *App) onDropFiles(hDrop uintptr) {
@@ -937,13 +1023,13 @@ func (a *App) onDropFiles(hDrop uintptr) {
 			p = abs
 		}
 		procDragFinish.Call(hDrop)
-		a.openBook(p)
+		a.openBook(p, true)
 		return
 	}
 	procDragFinish.Call(hDrop)
 }
 
-func (a *App) openBook(p string) {
+func (a *App) openBook(p string, showCover ...bool) {
 	p = strings.TrimSpace(p)
 	if p == "" {
 		return
@@ -951,6 +1037,7 @@ func (a *App) openBook(p string) {
 	if a.book != nil {
 		a.settings.setBookProgress(a.book.Path, a.progress)
 	}
+	wantCover := len(showCover) > 0 && showCover[0]
 	a.loadSeq++
 	seq := a.loadSeq
 	a.state = stateLoading
@@ -972,7 +1059,7 @@ func (a *App) openBook(p string) {
 			b, err = LoadEPUB(p)
 		}()
 		a.mu.Lock()
-		a.pending = &loadResult{book: b, err: err, path: p, seq: seq}
+		a.pending = &loadResult{book: b, err: err, path: p, seq: seq, showCover: wantCover}
 		a.mu.Unlock()
 		procPostMessageW.Call(a.hwnd, WM_APP_LOADED, uintptr(seq), 0)
 	}()
@@ -1003,6 +1090,7 @@ func (a *App) onLoadDone(seq int) {
 		return
 	}
 	a.book = res.book
+	a.imageCache = make(map[int]*renderedImage)
 	doc := BuildDocument(a.book)
 	p := a.settings.bookProgress(a.book.Path)
 	a.state = stateReading
@@ -1014,6 +1102,9 @@ func (a *App) onLoadDone(seq int) {
 	a.saveState(false)
 	procSetFocus.Call(a.rich)
 	a.hideCaret()
+	if res.showCover && a.book.CoverIndex >= 0 {
+		a.showImageViewer(a.book.CoverIndex, true)
+	}
 }
 
 func (a *App) updateWindowTitle(suffix string) {
@@ -1074,6 +1165,9 @@ func (a *App) showThemeMenu() {
 
 func (a *App) showMoreMenu() {
 	items := []menuItem{
+		{label: "查看封面", id: idCover, disabled: a.book == nil || a.book.CoverIndex < 0},
+		{label: "查看插图", id: idGallery, disabled: a.book == nil || len(a.book.Images) == 0},
+		{sep: true},
 		{label: "快捷键", id: idHelp},
 		{label: "关于墨阅", id: idAbout},
 		{sep: true},
@@ -1094,8 +1188,9 @@ func (a *App) messageBox(text, title string, flags uint32) {
 }
 
 func (a *App) showAbout() {
-	a.messageBox("墨阅  1.0.0\r\n轻量 EPUB 小说阅读器 · 单文件版\r\n\r\n"+
+	a.messageBox("墨阅  1.1.0\r\n轻量 EPUB 小说阅读器 · 单文件版\r\n\r\n"+
 		"内嵌字体：思源宋体、思源黑体、霞鹜文楷\r\n"+
+		"支持封面、正文插图查看与图片浏览。\r\n"+
 		"为长篇中文阅读设计，无需安装，绿色运行。\r\n\r\n"+
 		"字体版权归原作者所有，均以 SIL Open Font License 1.1 授权。", "关于墨阅", MB_OK|MB_ICONINFORMATION)
 }
@@ -1109,6 +1204,8 @@ func (a *App) showHelp() {
 		"Ctrl+← / →    上一章 / 下一章\r\n"+
 		"Alt+← / →     上一章 / 下一章\r\n"+
 		"Ctrl+滚轮     调整字号\r\n"+
+		"点击〔插图〕  打开封面 / 正文图片\r\n"+
+		"← / →         切换图片\r\n"+
 		"F11           全屏阅读（Esc 退出）\r\n"+
 		"F1            显示本帮助\r\n\r\n"+
 		"也可以把 EPUB 文件直接拖进窗口。", "快捷键", MB_OK|MB_ICONINFORMATION)
@@ -1138,14 +1235,14 @@ func (a *App) invalidateTOC() {
 }
 
 func (a *App) tocVisible() bool {
-	return a.settings.TOC && a.state == stateReading && !a.fullscreen && !a.dialogActive
+	return a.settings.TOC && a.state == stateReading && !a.fullscreen && !a.dialogActive && !a.viewerActive
 }
 
 func (a *App) showRich() {
 	if a.rich == 0 {
 		return
 	}
-	if a.state == stateReading && !a.dialogActive {
+	if a.state == stateReading && !a.dialogActive && !a.viewerActive {
 		procShowWindow.Call(a.rich, SW_SHOW)
 	} else {
 		procShowWindow.Call(a.rich, SW_HIDE)

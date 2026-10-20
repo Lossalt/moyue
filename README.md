@@ -23,7 +23,9 @@
 - **排版可调**：字号 13–40 pt、行距 1.2–3.0，实时生效并保持阅读位置。
 - **三种主题**：纸黄、青瓷（护眼）、夜读；Windows 标题栏 / Android 系统栏同步深浅色。
 - **目录侧栏**：支持 EPUB 2 NCX 与 EPUB 3 nav，多级目录缩进，点击跳转。
+- **封面与插图**：打开书时显示封面页；正文插图以占位符/图片呈现，点击可全屏查看并左右切换。
 - **阅读进度**：底部显示章节与百分比；退出后记住上次的书、位置和排版设置。Android 会在下次启动时自动续读。
+- **图片查看器**：封面与正文图片统一浏览，支持上一张 / 下一张、键盘方向键与 Esc 返回。
 - **全屏阅读**：`F11` 进入，`Esc` 退出，隐藏工具栏与状态栏。
 - **多种打开方式**：Windows 支持按钮选择、`Ctrl+O`、拖放和命令行参数；Android 使用系统文件选择器（SAF），无需存储权限。
 - 支持 UTF-8 / GBK / UTF-16 编码的 XHTML；Windows 版支持 Per-Monitor V2 高 DPI。
@@ -55,7 +57,8 @@
 
 1. 安装 `MoYue.apk`（Android 8.0 及以上）。
 2. 点击「打开一本 EPUB」，通过系统文件选择器选择小说。
-3. 顶部工具栏：打开、目录、字体、字号 `A− / A+`、行距、主题、更多。
+3. 封面显示在书页顶部；正文插图直接显示，点击封面或插图可全屏查看。
+4. 顶部工具栏：打开、目录、字体、字号 `A− / A+`、行距、主题、更多。
 4. 退出后会自动记住上次的书、阅读位置和排版设置。
 
 > Android 版使用 `ACTION_OPEN_DOCUMENT`，不需要存储权限；如果系统文件管理器不可用，也可以先把 EPUB 保存到「下载」目录再选择。
@@ -84,6 +87,12 @@ Android：使用应用私有 `SharedPreferences`（`moyue_reader`），不写入
 |---|---|
 | <img src="docs/android-reading.png" width="260" alt="Android 纸黄"> | <img src="docs/android-night.png" width="260" alt="Android 夜读"> |
 
+| Android 封面 | Android 正文插图 |
+|---|---|
+| <img src="docs/android-cover.png" width="260" alt="Android 封面"> | <img src="docs/android-images.png" width="260" alt="Android 正文插图"> |
+
+<img src="docs/android-viewer.png" width="260" alt="Android 图片查看器">
+
 ![快捷键](docs/shortcuts.png)
 
 ![全屏阅读](docs/fullscreen.png)
@@ -93,9 +102,10 @@ Android：使用应用私有 `SharedPreferences`（`moyue_reader`），不写入
 - Windows 10 / 11 x64；Android 8.0+（APK 为通用包，无 ABI 限制）。
 - 支持 EPUB 2 / EPUB 3、NCX / nav 目录、嵌套目录、UTF-8/GBK/UTF-16 文本。
 - 不打开带 DRM / 加密的 EPUB。
-- 当前是**纯文字阅读器**：不渲染封面和书内图片，图片位置会显示「〔插图〕」；不解析 CSS、复杂版式、固定版式（漫画类）EPUB。
+- 不解析 CSS、复杂版式、固定版式（漫画类）EPUB；SVG 图片暂不渲染。
+- Windows 版受 RichEdit 限制，正文中的图片以「〔插图〕」占位符呈现，点击后打开图片查看器；Android 版图片直接排在正文中。
 - 目录若指向同一个 XHTML 内的多个锚点，会跳到该文件的开始处（常见小说通常一章一个 XHTML，不受影响）。
-- Android 版目前为纯文字阅读，不渲染图片/封面；使用系统字体作为界面文字，正文使用内嵌字体。
+- Android 版使用系统字体作为界面文字，正文使用内嵌字体。
 - 内嵌字体是子集，覆盖《通用规范汉字表》8105 字及常用标点、拉丁字母；极生僻字会回退到系统字体。
 - 未签名程序首次运行时，Windows SmartScreen 可能提示。可选择「更多信息 → 仍要运行」。
 
@@ -155,10 +165,11 @@ dist/MoYue.apk
 
 | 文件 | 作用 |
 |---|---|
-| `epub.go` | EPUB 容器、OPF、NCX / nav、编码解码 |
+| `epub.go` | EPUB 容器、OPF、NCX / nav、封面与插图、编码解码 |
 | `text.go` | XHTML → 段落 / 行内样式，中文空白与标点处理 |
 | `document.go` | 合并章节、UTF-16 偏移、行间定位 |
 | `reader.go` | RichEdit 排版、字号 / 行距 / 颜色、滚动定位 |
+| `image.go` / `image_view_windows.go` | 图片解码、封面 / 插图查看器 |
 | `win32.go` | Win32 / GDI / RichEdit 绑定 |
 | `ui_paint.go` | 工具栏、状态栏、欢迎页、对话框 |
 | `menu.go` / `toc.go` / `dialog.go` | 自定义菜单、目录、对话框 |

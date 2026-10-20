@@ -5,6 +5,7 @@ import android.app.Dialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.database.Cursor;
+import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
@@ -24,6 +25,7 @@ import android.widget.AdapterView;
 import android.widget.BaseAdapter;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
@@ -220,6 +222,12 @@ public final class MainActivity extends Activity {
             @Override public void onScrollStateChanged(AbsListView view, int scrollState) {}
             @Override public void onScroll(AbsListView view, int firstVisibleItem, int visibleItemCount, int totalItemCount) {
                 updateStatus();
+            }
+        });
+        list.setOnItemClickListener(new AdapterView.OnItemClickListener() {
+            @Override public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
+                int image = adapter == null ? -1 : adapter.imageIndexAt(position);
+                if (image >= 0) showImageDialog(image);
             }
         });
   }
@@ -430,6 +438,7 @@ public final class MainActivity extends Activity {
         lastTitle = b.title;
         adapter = new ReaderAdapter(this);
         adapter.setStyle(typeface(), fontSize, lineSpacing, theme);
+        adapter.setImages(b.images);
         List<ReaderAdapter.Row> rows = buildRows(b);
         adapter.setRows(rows);
         list.setAdapter(adapter);
@@ -449,6 +458,9 @@ public final class MainActivity extends Activity {
 
     private List<ReaderAdapter.Row> buildRows(Epub.Book b) {
         List<ReaderAdapter.Row> rows = new ArrayList<>();
+        if (b.coverIndex >= 0 && b.coverIndex < b.images.size()) {
+            rows.add(new ReaderAdapter.Row(ReaderAdapter.IMAGE, "封面", -1, b.coverIndex));
+        }
         rows.add(new ReaderAdapter.Row(ReaderAdapter.BOOK_TITLE, b.title, -1));
         rows.add(new ReaderAdapter.Row(ReaderAdapter.AUTHOR, b.author, -1));
         for (int i = 0; i < b.chapters.size(); i++) {
@@ -456,6 +468,10 @@ public final class MainActivity extends Activity {
             ch.startRow = rows.size();
             rows.add(new ReaderAdapter.Row(ReaderAdapter.CHAPTER_TITLE, ch.title, i));
             for (Epub.Block block : ch.blocks) {
+                if (block.type == Epub.BLOCK_IMAGE && block.imageIndex >= 0) {
+                    rows.add(new ReaderAdapter.Row(ReaderAdapter.IMAGE, block.text, i, block.imageIndex));
+                    continue;
+                }
                 int type;
                 if (block.type == Epub.BLOCK_HEADING) type = ReaderAdapter.CHAPTER_TITLE;
                 else if (block.type == Epub.BLOCK_QUOTE) type = ReaderAdapter.QUOTE;
@@ -703,8 +719,8 @@ public final class MainActivity extends Activity {
         String[] labels = {"快捷键", "关于墨阅"};
         showChoiceDialog("更多", labels, -1, new ChoiceListener() {
             @Override public void onChoice(int index) {
-                if (index == 0) showTextDialog("快捷键", "Android 版通过工具栏操作：\n\n· 打开：选择 EPUB 文件\n· 目录：跳转章节\n· 宋体/黑体/楷体：切换字体\n· A− / A+：调整字号\n· 行距：调整行间距\n· ☀/☾：切换主题\n\n退出后会自动记住上次的书和阅读位置。");
-                else showTextDialog("关于墨阅", "墨阅 1.0.0 · Android 版\n\n轻量 EPUB 小说阅读器。单 APK、完全离线，内嵌思源宋体、思源黑体和霞鹜文楷。\n\n字体以 SIL Open Font License 1.1 授权。");
+                if (index == 0) showTextDialog("快捷键", "Android 版通过工具栏操作：\n\n· 打开：选择 EPUB 文件\n· 目录：跳转章节\n· 宋体/黑体/楷体：切换字体\n· A− / A+：调整字号\n· 行距：调整行间距\n· ☀/☾：切换主题\n· 点击封面或正文插图：全屏查看，左右切换\n\n退出后会自动记住上次的书和阅读位置。");
+                else showTextDialog("关于墨阅", "墨阅 1.1.0 · Android 版\n\n轻量 EPUB 小说阅读器。单 APK、完全离线，支持封面与正文插图查看，内嵌思源宋体、思源黑体和霞鹜文楷。\n\n字体以 SIL Open Font License 1.1 授权。");
             }
         });
     }
@@ -927,6 +943,133 @@ public final class MainActivity extends Activity {
             lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
             win.setAttributes(lp);
         }
+    }
+
+    private void showImageDialog(int start) {
+        if (book == null || book.images.isEmpty()) return;
+        final int count = book.images.size();
+        final int[] current = {Math.max(0, Math.min(count - 1, start))};
+        final Dialog dialog = new Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen);
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout rootView = new LinearLayout(this);
+        rootView.setOrientation(LinearLayout.VERTICAL);
+        rootView.setBackgroundColor(Color.BLACK);
+
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(16), dp(10), dp(16), dp(10));
+        TextView title = new TextView(this);
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f);
+        title.setTextColor(Color.WHITE);
+        title.setSingleLine(true);
+        title.setEllipsize(TextUtils.TruncateAt.END);
+        top.addView(title, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView close = new TextView(this);
+        close.setText("关闭");
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f);
+        close.setTextColor(Color.WHITE);
+        close.setPadding(dp(14), dp(6), dp(6), dp(6));
+        close.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { dialog.dismiss(); }
+        });
+        top.addView(close);
+        rootView.addView(top, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout stage = new FrameLayout(this);
+        final ImageView image = new ImageView(this);
+        image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        image.setBackgroundColor(Color.BLACK);
+        stage.addView(image, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        final TextView fallback = new TextView(this);
+        fallback.setGravity(Gravity.CENTER);
+        fallback.setTextColor(Color.LTGRAY);
+        fallback.setText("〔图片无法显示〕");
+        fallback.setVisibility(View.GONE);
+        stage.addView(fallback, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        rootView.addView(stage, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.HORIZONTAL);
+        bottom.setGravity(Gravity.CENTER);
+        bottom.setPadding(dp(12), dp(8), dp(12), dp(14));
+        TextView prev = viewerButton("上一张");
+        TextView counter = new TextView(this);
+        counter.setTextColor(Color.WHITE);
+        counter.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        counter.setGravity(Gravity.CENTER);
+        TextView next = viewerButton("下一张");
+        bottom.addView(prev, new LinearLayout.LayoutParams(dp(86), dp(42)));
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        bottom.addView(counter, clp);
+        bottom.addView(next, new LinearLayout.LayoutParams(dp(86), dp(42)));
+        rootView.addView(bottom, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final Runnable render = new Runnable() {
+            @Override public void run() {
+                int idx = current[0];
+                Epub.ImageAsset asset = book.images.get(idx);
+                String label = idx == book.coverIndex ? "封面" : (asset.alt == null ? "插图" : asset.alt);
+                title.setText(label);
+                counter.setText((idx + 1) + " / " + count);
+                Bitmap bitmap = ImageUtil.decode(asset.data, getResources().getDisplayMetrics().widthPixels);
+                if (bitmap != null) {
+                    image.setImageBitmap(bitmap);
+                    image.setVisibility(View.VISIBLE);
+                    fallback.setVisibility(View.GONE);
+                } else {
+                    image.setImageDrawable(null);
+                    image.setVisibility(View.GONE);
+                    fallback.setVisibility(View.VISIBLE);
+                }
+                prev.setAlpha(count > 1 ? 1f : 0.35f);
+                next.setAlpha(count > 1 ? 1f : 0.35f);
+            }
+        };
+        prev.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (count <= 1) return;
+                current[0] = (current[0] - 1 + count) % count;
+                render.run();
+            }
+        });
+        next.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (count <= 1) return;
+                current[0] = (current[0] + 1) % count;
+                render.run();
+            }
+        });
+        render.run();
+
+        dialog.setContentView(rootView);
+        dialog.show();
+        Window win = dialog.getWindow();
+        if (win != null) {
+            win.setBackgroundDrawable(new ColorDrawable(Color.BLACK));
+            win.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+        }
+    }
+
+    private TextView viewerButton(String text) {
+        TextView v = new TextView(this);
+        v.setText(text);
+        v.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f);
+        v.setTextColor(Color.WHITE);
+        v.setGravity(Gravity.CENTER);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(44, 41, 36));
+        bg.setCornerRadius(dp(8));
+        v.setBackground(bg);
+        v.setClickable(true);
+        v.setFocusable(true);
+        return v;
     }
 
     private String shortTitle(String s) {

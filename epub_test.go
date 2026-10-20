@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -280,5 +281,54 @@ func TestProtectLineBreaks(t *testing.T) {
 	got := protectLineBreaks("甲，乙。丙")
 	if !strings.Contains(got, "\u2060，") || !strings.Contains(got, "\u2060。") {
 		t.Fatalf("word joiners missing: %q", got)
+	}
+}
+
+func TestLoadEPUBCoverAndImages(t *testing.T) {
+	png, _ := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	opf := `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0">
+ <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <dc:title>画集</dc:title><meta name="cover" content="cover-img"/>
+ </metadata>
+ <manifest>
+  <item id="cover-img" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+  <item id="pic" href="images/pic.png" media-type="image/png"/>
+  <item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/>
+ </manifest>
+ <spine><itemref idref="c1"/></spine>
+</package>`
+	ch := `<html><body><h1>开篇</h1><p>前文。</p><img src="../images/pic.png" alt="山雨"/><p>后文。</p></body></html>`
+	p := makeEPUB(t, []testFile{
+		{"META-INF/container.xml", containerXML("OEBPS/content.opf")},
+		{"OEBPS/content.opf", opf},
+		{"OEBPS/text/c1.xhtml", ch},
+		{"OEBPS/images/cover.png", string(png)},
+		{"OEBPS/images/pic.png", string(png)},
+	})
+	book, err := LoadEPUB(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if book.CoverIndex != 0 || len(book.Images) != 2 {
+		t.Fatalf("cover index=%d images=%d", book.CoverIndex, len(book.Images))
+	}
+	if book.Images[0].MediaType != "image/png" || len(book.Images[0].Data) == 0 {
+		t.Fatalf("cover asset: %+v", book.Images[0])
+	}
+	found := false
+	for _, b := range book.Chapters[0].Blocks {
+		if b.Kind == KindImage {
+			found = true
+			if b.ImageIndex < 0 || b.ImageIndex >= len(book.Images) {
+				t.Fatalf("bad image index %d", b.ImageIndex)
+			}
+			if !strings.Contains(b.Text(), "山雨") {
+				t.Fatalf("alt missing: %q", b.Text())
+			}
+		}
+	}
+	if !found {
+		t.Fatal("image block not found")
 	}
 }

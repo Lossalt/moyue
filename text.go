@@ -153,9 +153,17 @@ func parseContent(data []byte) (blocks []Block, firstHeading, docTitle string) {
 		case "img":
 			alt := strings.TrimSpace(attrValue(n, "alt"))
 			if alt == "" {
-				alt = "〔插图〕"
+				alt = "插图"
 			}
-			b.addText(" "+alt+" ", st)
+			src := strings.TrimSpace(attrValue(n, "src"))
+			b.flush()
+			b.blocks = append(b.blocks, Block{
+				Kind:     KindImage,
+				Align:    AlignCenter,
+				Runs:     []Run{{Text: "〔" + alt + "〕"}},
+				ImageSrc: src,
+				ImageAlt: alt,
+			})
 			return
 		case "h1", "h2", "h3", "h4", "h5", "h6":
 			b.flush()

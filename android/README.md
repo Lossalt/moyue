@@ -6,11 +6,14 @@
 - 内嵌思源宋体、思源黑体、霞鹜文楷
 - 字号 13–40 pt、行距 1.2–3.0
 - 纸黄 / 青瓷 / 夜读三主题
+- 封面页、正文插图，点击可全屏查看并左右切换
 - EPUB 2 NCX / EPUB 3 nav 目录，多级缩进
 - 自动记住上次的书、阅读位置和排版设置
 - 通过系统文件选择器（SAF）打开 EPUB，不需要存储权限
 
 <img src="../docs/android-reading.png" width="300" alt="Android 阅读界面">
+
+<img src="../docs/android-cover.png" width="300" alt="Android 封面">
 
 ## 构建
 
@@ -69,7 +72,8 @@ android/
 ├── src/com/lossalt/moyue/
 │   ├── MainActivity.java          界面、工具栏、文件选择、设置
 │   ├── ReaderAdapter.java         阅读列表与排版
-│   ├── Epub.java                  EPUB 容器/OPF/NCX/nav/XHTML 解析
+│   ├── Epub.java                  EPUB 容器/OPF/NCX/nav/图片/XHTML 解析
+│   ├── ImageUtil.java             图片采样、EXIF 旋转
 │   └── Theme.java                 三套主题
 ├── test/com/lossalt/moyue/
 │   └── ParserSmoke.java           JVM 解析冒烟测试
@@ -87,8 +91,8 @@ java -cp build/testclasses com.lossalt.moyue.ParserSmoke ../examples/灯下集.e
 
 ## 已知限制
 
-- 当前是纯文字阅读器：不渲染封面和书内图片，图片位置显示「〔插图〕」。
 - 不解析 CSS，复杂版式/固定版式（漫画）EPUB 可能无法正确显示。
+- SVG 图片暂不渲染；JPEG / PNG / GIF / WebP / BMP 可直接显示。
 - 不支持 DRM。
 - 目录指向同一个 XHTML 内多个锚点时只跳文件开头（常见一章一文件的小说不受影响）。
 - 内嵌字体为子集，极生僻字会回退到系统字体。

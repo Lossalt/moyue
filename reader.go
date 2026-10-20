@@ -221,6 +221,12 @@ func (a *App) blockStyleFor(pb PositionedBlock) blockStyle {
 		base.align = PFA_CENTER
 		base.start, base.offset = 0, 0
 		base.before, base.after = 1.5, 1.5
+	case KindImage:
+		base.sizeFactor = 0.92
+		base.color = a.theme.Accent
+		base.align = PFA_CENTER
+		base.start, base.offset = 0, 0
+		base.before, base.after = 1.1, 1.1
 	default:
 		if pb.Align == AlignCenter {
 			base.align = PFA_CENTER

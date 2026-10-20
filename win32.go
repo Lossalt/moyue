@@ -14,6 +14,20 @@ import (
 type POINT struct{ X, Y int32 }
 type POINTL struct{ X, Y int32 }
 type RECT struct{ Left, Top, Right, Bottom int32 }
+
+type BITMAPINFOHEADER struct {
+	BiSize          uint32
+	BiWidth         int32
+	BiHeight        int32
+	BiPlanes        uint16
+	BiBitCount      uint16
+	BiCompression   uint32
+	BiSizeImage     uint32
+	BiXPelsPerMeter int32
+	BiYPelsPerMeter int32
+	BiClrUsed       uint32
+	BiClrImportant  uint32
+}
 type SIZE struct{ CX, CY int32 }
 type CHARRANGE struct{ CpMin, CpMax int32 }
 
@@ -261,6 +275,8 @@ var (
 	procLineTo                 = gdi32.NewProc("LineTo")
 	procSetPixel               = gdi32.NewProc("SetPixel")
 	procArc                    = gdi32.NewProc("Arc")
+	procStretchDIBits          = gdi32.NewProc("StretchDIBits")
+	procSetStretchBltMode      = gdi32.NewProc("SetStretchBltMode")
 
 	procGetOpenFileNameW = comdlg32.NewProc("GetOpenFileNameW")
 
@@ -349,8 +365,11 @@ const (
 	DT_CALCRECT     = 0x0400
 	DT_TOP          = 0x0000
 
-	SRCCOPY     = 0x00CC0020
-	TRANSPARENT = 1
+	SRCCOPY        = 0x00CC0020
+	HALFTONE       = 4
+	BI_RGB         = 0
+	DIB_RGB_COLORS = 0
+	TRANSPARENT    = 1
 
 	PS_SOLID = 0
 	PS_NULL  = 5
@@ -429,6 +448,7 @@ const (
 	EM_EXSETSEL             = WM_USER + 55
 	EM_EXGETSEL             = WM_USER + 52
 	EM_EXLINEFROMCHAR       = WM_USER + 54
+	EM_CHARFROMPOS          = WM_USER + 215
 	EM_POSFROMCHAR          = WM_USER + 38
 	EM_LINEINDEX            = 0x00BB
 	EM_LINEFROMCHAR         = 0x00C9

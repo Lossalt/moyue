@@ -13,6 +13,10 @@ public final class ParserSmoke {
         int blocks = 0;
         for (Epub.Chapter c : book.chapters) blocks += c.blocks.size();
         System.out.println("blocks: " + blocks);
+        System.out.println("images: " + book.images.size() + " cover=" + book.coverIndex);
+        for (Epub.Block b : book.chapters.get(0).blocks) {
+            if (b.type == Epub.BLOCK_IMAGE) System.out.println("  image block idx=" + b.imageIndex + " " + b.text);
+        }
         for (int i = 0; i < Math.min(3, book.chapters.size()); i++) {
             Epub.Chapter c = book.chapters.get(i);
             System.out.println("  " + (i + 1) + ". [L" + c.level + "] " + c.title + " (" + c.blocks.size() + " blocks)");

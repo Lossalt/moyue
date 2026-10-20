@@ -37,11 +37,41 @@ public final class Epub {
     public static final int BLOCK_HEADING = 1;
     public static final int BLOCK_QUOTE = 2;
     public static final int BLOCK_DIVIDER = 3;
+    public static final int BLOCK_IMAGE = 4;
 
     public static final class Block {
         public final int type;
         public final String text;
-        Block(int type, String text) { this.type = type; this.text = text; }
+        public final String imageSrc;
+        public final String imageAlt;
+        public final int imageIndex;
+        Block(int type, String text) { this(type, text, null, null, -1); }
+        Block(int type, String text, String imageSrc, String imageAlt, int imageIndex) {
+            this.type = type;
+            this.text = text;
+            this.imageSrc = imageSrc;
+            this.imageAlt = imageAlt;
+            this.imageIndex = imageIndex;
+        }
+    }
+
+    public static final class ImageAsset {
+        public final String href;
+        public final String mediaType;
+        public final String alt;
+        public final byte[] data;
+        ImageAsset(String href, String mediaType, String alt, byte[] data) {
+            this.href = href;
+            this.mediaType = mediaType;
+            this.alt = alt;
+            this.data = data;
+        }
+    }
+
+    private static final class ImageRef {
+        final String src;
+        final String alt;
+        ImageRef(String src, String alt) { this.src = src; this.alt = alt; }
     }
 
     public static final class Chapter {
@@ -55,6 +85,8 @@ public final class Epub {
         public String title = "";
         public String author = "";
         public final List<Chapter> chapters = new ArrayList<>();
+        public final List<ImageAsset> images = new ArrayList<>();
+        public int coverIndex = -1;
     }
 
     private static final class TocItem {
@@ -77,6 +109,7 @@ public final class Epub {
     private static final Pattern TITLE_TAG = Pattern.compile("(?is)<title[^>]*>(.*?)</title>");
     private static final Pattern IMG_TAG = Pattern.compile("(?is)<img\\b([^>]*)>");
     private static final Pattern ALT_ATTR = Pattern.compile("(?is)alt\\s*=\\s*[\"']([^\"']*)[\"']");
+    private static final Pattern SRC_ATTR = Pattern.compile("(?is)src\\s*=\\s*[\"']([^\"']*)[\"']");
     private static final Pattern HREF_ATTR = Pattern.compile("(?is)href\\s*=\\s*[\"']([^\"']+)[\"']");
     private static final Pattern ANCHOR = Pattern.compile("(?is)<a\\b([^>]*)>(.*?)</a>");
     private static final Pattern NUM_ENTITY = Pattern.compile("&#(x?)([0-9a-fA-F]+);");
@@ -191,6 +224,11 @@ public final class Epub {
                 if (!tocByPath.containsKey(t.path)) tocByPath.put(t.path, t);
             }
 
+            Map<String, Item> itemsByHref = new HashMap<>();
+            for (Item it : items.values()) {
+                if (it.href != null) itemsByHref.put(it.href, it);
+            }
+
             List<TocItem> spineRefs = new ArrayList<>();
             for (Element e : descendants(spine, "itemref")) {
                 TocItem r = new TocItem();
@@ -199,6 +237,42 @@ public final class Epub {
                 spineRefs.add(r);
             }
             if (spineRefs.isEmpty()) throw new IOException("EPUB 没有可阅读的章节（spine 为空）");
+
+            String coverHref = "";
+            if (metadata != null) {
+                for (Element e : descendants(metadata, "meta")) {
+                    if (!"cover".equalsIgnoreCase(e.getAttribute("name").trim())) continue;
+                    Item it = items.get(e.getAttribute("content").trim());
+                    if (it != null && isImagePath(it.href)) { coverHref = it.href; break; }
+                }
+            }
+            if (coverHref.isEmpty()) {
+                for (Item it : items.values()) {
+                    String props = it.properties == null ? "" : it.properties.toLowerCase(Locale.ROOT);
+                    if (props.contains("cover-image") && isImagePath(it.href)) { coverHref = it.href; break; }
+                }
+            }
+            if (coverHref.isEmpty()) {
+                Element guide = firstByLocal(opf, "guide");
+                if (guide != null) {
+                    for (Element e : descendants(guide, "reference")) {
+                        String type = e.getAttribute("type").toLowerCase(Locale.ROOT);
+                        if (!type.contains("cover")) continue;
+                        String href = resolve(opfPath, e.getAttribute("href"), true);
+                        if (isImagePath(href)) { coverHref = href; break; }
+                        byte[] raw = reader.readOrNull(href);
+                        if (raw != null) {
+                            String img = firstImageInHtml(decode(raw), href);
+                            if (!img.isEmpty()) { coverHref = img; break; }
+                        }
+                    }
+                }
+            }
+            Map<String, Integer> imageByHref = new HashMap<>();
+            long[] imageBytes = new long[]{0};
+            if (!coverHref.isEmpty()) {
+                book.coverIndex = loadImage(reader, itemsByHref, book, imageByHref, coverHref, "封面", imageBytes);
+            }
 
             Map<String, Boolean> seen = new HashMap<>();
             int chapterNo = 0;
@@ -213,6 +287,17 @@ public final class Epub {
                 if (raw == null) continue;
                 ParsedContent pc = parseContent(decode(raw));
                 if (pc.blocks.isEmpty()) continue;
+                for (int bi = 0; bi < pc.blocks.size(); bi++) {
+                    Block b = pc.blocks.get(bi);
+                    if (b.type != BLOCK_IMAGE) continue;
+                    String src = resolve(it.href, b.imageSrc, true);
+                    int idx = loadImage(reader, itemsByHref, book, imageByHref, src, b.imageAlt, imageBytes);
+                    if (idx < 0) {
+                        pc.blocks.set(bi, new Block(BLOCK_BODY, "〔插图无法显示〕"));
+                    } else {
+                        pc.blocks.set(bi, new Block(BLOCK_IMAGE, imagePlaceholder(idx, b.imageAlt), b.imageSrc, b.imageAlt, idx));
+                    }
+                }
 
                 chapterNo++;
                 TocItem t = tocByPath.get(it.href);
@@ -249,6 +334,7 @@ public final class Epub {
 
     private static final class ParsedContent {
         final List<Block> blocks = new ArrayList<>();
+        final List<ImageRef> images = new ArrayList<>();
         String heading = "";
         String docTitle = "";
     }
@@ -266,7 +352,7 @@ public final class Epub {
         body = body.replaceAll("(?is)<head\\b.*?</head>", " ");
         body = body.replaceAll("(?is)<(script|style|svg|nav|header|footer)\\b.*?</\\1>", " ");
         body = body.replaceAll("(?is)<!--.*?-->", " ");
-        body = replaceImages(body);
+        body = replaceImages(body, out.images);
 
         body = body.replaceAll("(?is)<h[1-6]\\b[^>]*>", "\u0000\u0003");
         body = body.replaceAll("(?is)</h[1-6]>", "\u0000");
@@ -283,6 +369,19 @@ public final class Epub {
         String[] chunks = body.split("\u0000", -1);
         for (String chunk : chunks) {
             if (chunk == null) continue;
+            if (chunk.startsWith("\u0006")) {
+                int end = chunk.indexOf('\u0007');
+                if (end > 1) {
+                    try {
+                        int ref = Integer.parseInt(chunk.substring(1, end));
+                        if (ref >= 0 && ref < out.images.size()) {
+                            ImageRef ir = out.images.get(ref);
+                            out.blocks.add(new Block(BLOCK_IMAGE, "〔" + ir.alt + "〕", ir.src, ir.alt, -1));
+                        }
+                    } catch (NumberFormatException ignored) {}
+                }
+                continue;
+            }
             int type = BLOCK_BODY;
             if (chunk.startsWith("\u0003")) { type = BLOCK_HEADING; chunk = chunk.substring(1); }
             else if (chunk.startsWith("\u0004")) { type = BLOCK_QUOTE; chunk = chunk.substring(1); }
@@ -298,7 +397,7 @@ public final class Epub {
         return out;
     }
 
-    private static String replaceImages(String body) {
+    private static String replaceImages(String body, List<ImageRef> refs) {
         Matcher m = IMG_TAG.matcher(body);
         StringBuffer sb = new StringBuffer();
         while (m.find()) {
@@ -306,10 +405,72 @@ public final class Epub {
             Matcher am = ALT_ATTR.matcher(attrs);
             String alt = am.find() ? cleanText(decodeEntities(am.group(1))) : "";
             if (alt.isEmpty()) alt = "插图";
-            m.appendReplacement(sb, Matcher.quoteReplacement("〔" + alt + "〕"));
+            Matcher sm = SRC_ATTR.matcher(attrs);
+            String src = sm.find() ? decodeEntities(sm.group(1)).trim() : "";
+            refs.add(new ImageRef(src, alt));
+            m.appendReplacement(sb, Matcher.quoteReplacement("\u0000\u0006" + (refs.size() - 1) + "\u0007\u0000"));
         }
         m.appendTail(sb);
         return sb.toString();
+    }
+
+
+    private static int loadImage(ZipReader reader, Map<String, Item> itemsByHref, Book book,
+                                 Map<String, Integer> indexByHref, String href, String alt,
+                                 long[] imageBytes) {
+        href = normalizePath(href);
+        if (href.isEmpty()) return -1;
+        Integer cached = indexByHref.get(href);
+        if (cached != null) return cached;
+        byte[] data = reader.readOrNull(href);
+        if (data == null || data.length == 0 || data.length > 32L * 1024 * 1024) return -1;
+        if (imageBytes[0] + data.length > 96L * 1024 * 1024) return -1;
+        Item item = itemsByHref.get(href);
+        String media = item == null ? "" : item.mediaType;
+        media = mediaTypeForImage(href, media);
+        if (alt == null || alt.trim().isEmpty()) alt = "插图";
+        int index = book.images.size();
+        book.images.add(new ImageAsset(href, media, alt, data));
+        imageBytes[0] += data.length;
+        indexByHref.put(href, index);
+        return index;
+    }
+
+    private static boolean isImagePath(String href) {
+        if (href == null) return false;
+        String h = href.toLowerCase(Locale.ROOT);
+        return h.endsWith(".jpg") || h.endsWith(".jpeg") || h.endsWith(".png")
+                || h.endsWith(".gif") || h.endsWith(".webp") || h.endsWith(".bmp")
+                || h.endsWith(".avif");
+    }
+
+    private static String mediaTypeForImage(String href, String declared) {
+        if (declared != null) {
+            String d = declared.trim().toLowerCase(Locale.ROOT);
+            if (d.startsWith("image/")) return d;
+        }
+        String h = href == null ? "" : href.toLowerCase(Locale.ROOT);
+        if (h.endsWith(".jpg") || h.endsWith(".jpeg")) return "image/jpeg";
+        if (h.endsWith(".png")) return "image/png";
+        if (h.endsWith(".gif")) return "image/gif";
+        if (h.endsWith(".webp")) return "image/webp";
+        if (h.endsWith(".bmp")) return "image/bmp";
+        return "application/octet-stream";
+    }
+
+    private static String firstImageInHtml(String html, String baseFile) {
+        Matcher m = IMG_TAG.matcher(html);
+        if (!m.find()) return "";
+        Matcher sm = SRC_ATTR.matcher(m.group(1));
+        if (!sm.find()) return "";
+        return resolve(baseFile, decodeEntities(sm.group(1)), true);
+    }
+
+    private static String imagePlaceholder(int index, String alt) {
+        alt = cleanText(alt);
+        if (alt.isEmpty() || "插图".equals(alt)) return "〔插图 " + (index + 1) + "〕";
+        if (alt.length() > 16) alt = alt.substring(0, 16) + "…";
+        return "〔插图 " + (index + 1) + " · " + alt + "〕";
     }
 
     private static String normalizeText(String s) {
