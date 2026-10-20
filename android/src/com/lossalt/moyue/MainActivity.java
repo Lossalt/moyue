@@ -59,7 +59,7 @@ public final class MainActivity extends Activity {
     private int themeIndex = 0;
     private String fontKey = "serif";
     private float fontSize = 19f;
-    private float lineSpacing = 1.7f;
+    private float lineSpacing = 1.5f;
 
     private LinearLayout root;
     private HorizontalScrollView toolbarScroll;
@@ -85,7 +85,7 @@ public final class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         fontKey = prefs.getString(KEY_FONT, "serif");
         fontSize = prefs.getFloat(KEY_SIZE, 19f);
-        lineSpacing = prefs.getFloat(KEY_LINE, 1.7f);
+        lineSpacing = prefs.getFloat(KEY_LINE, 1.5f);
         themeIndex = prefs.getInt(KEY_THEME, 0);
         lastUri = prefs.getString(KEY_URI, "");
         lastTitle = prefs.getString(KEY_TITLE, "");
@@ -586,9 +586,14 @@ public final class MainActivity extends Activity {
         return name == null ? "EPUB" : name;
     }
 
+    private int effectivePosition() {
+        if (adapter == null) return 0;
+        return Math.min(adapter.rowCount() - 1, list.getFirstVisiblePosition() + 1);
+    }
+
     private int currentChapter() {
         if (adapter == null) return -1;
-        return adapter.chapterAt(list.getFirstVisiblePosition());
+        return adapter.chapterAt(effectivePosition());
     }
 
     private void updateStatus() {
@@ -598,7 +603,7 @@ public final class MainActivity extends Activity {
         }
         int total = adapter.rowCount();
         int pos = Math.max(0, list.getFirstVisiblePosition());
-        int ch = adapter.chapterAt(pos);
+        int ch = adapter.chapterAt(effectivePosition());
         int percent = total <= 1 ? 0 : Math.round(pos * 100f / (total - 1));
         if (ch >= 0 && ch < book.chapters.size()) {
             status.setText(String.format(Locale.US, "第 %d/%d 章 · %d%%", ch + 1, book.chapters.size(), percent));
@@ -630,11 +635,20 @@ public final class MainActivity extends Activity {
 
     private void jumpChapter(int index) {
         if (book == null || index < 0 || index >= book.chapters.size()) return;
-        Epub.Chapter ch = book.chapters.get(index);
-        list.setSelection(ch.startRow);
-        list.post(new Runnable() {
-            @Override public void run() { updateStatus(); }
-        });
+        final Epub.Chapter ch = book.chapters.get(index);
+        // The dialog is still dismissing when the item click arrives; defer the
+        // scroll until the ListView has focus and its layout is active again.
+        list.postDelayed(new Runnable() {
+            @Override public void run() {
+                list.setSelection(ch.startRow);
+                updateStatus();
+            }
+        }, 300);
+        list.postDelayed(new Runnable() {
+            @Override public void run() {
+                updateStatus();
+            }
+        }, 900);
     }
 
     private void showFontDialog() {
@@ -663,8 +677,8 @@ public final class MainActivity extends Activity {
     }
 
     private void showLineDialog() {
-        final float[] values = {1.2f, 1.4f, 1.6f, 1.7f, 1.8f, 2.0f, 2.2f, 2.5f, 3.0f};
-        String[] labels = {"紧凑 1.2", "舒适 1.4", "宽松 1.6", "标准 1.7", "疏朗 1.8", "大字 2.0", "宽松 2.2", "疏朗 2.5", "极宽 3.0"};
+        final float[] values = {1.2f, 1.4f, 1.5f, 1.6f, 1.7f, 1.8f, 2.0f, 2.2f, 2.5f, 3.0f};
+        String[] labels = {"紧凑 1.2", "舒适 1.4", "标准 1.5", "宽松 1.6", "疏朗 1.7", "大字 1.8", "宽松 2.0", "疏朗 2.2", "极宽 2.5", "极宽 3.0"};
         int selected = 0;
         for (int i = 0; i < values.length; i++) {
             if (Math.abs(values[i] - lineSpacing) < 0.05f) selected = i;
@@ -707,6 +721,9 @@ public final class MainActivity extends Activity {
         if (adapter != null) {
             adapter.setStyle(typeface(), fontSize, lineSpacing, theme);
             list.setSelection(pos);
+            list.postDelayed(new Runnable() {
+                @Override public void run() { updateStatus(); }
+            }, 150);
         }
         refreshToolbar();
         saveSettings();
@@ -719,6 +736,9 @@ public final class MainActivity extends Activity {
         if (adapter != null) {
             adapter.setStyle(typeface(), fontSize, lineSpacing, theme);
             list.setSelection(pos);
+            list.postDelayed(new Runnable() {
+                @Override public void run() { updateStatus(); }
+            }, 150);
         }
         emptyBrand.setTypeface(typeface(), Typeface.BOLD);
         refreshToolbar();
@@ -732,6 +752,9 @@ public final class MainActivity extends Activity {
         if (adapter != null) {
             adapter.setStyle(typeface(), fontSize, lineSpacing, theme);
             list.setSelection(pos);
+            list.postDelayed(new Runnable() {
+                @Override public void run() { updateStatus(); }
+            }, 150);
         }
         refreshToolbar();
         saveSettings();
@@ -744,6 +767,9 @@ public final class MainActivity extends Activity {
         theme = Theme.get(index);
         applyTheme();
         list.setSelection(pos);
+        list.postDelayed(new Runnable() {
+            @Override public void run() { updateStatus(); }
+        }, 150);
         saveSettings();
     }
 

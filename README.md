@@ -74,11 +74,15 @@ Android：使用应用私有 `SharedPreferences`（`moyue_reader`），不写入
 
 ## 截图
 
-> 以下为 Windows 版界面；Android 版使用同一套字体、主题与排版逻辑。
+> Windows 与 Android 使用同一套字体、主题与排版逻辑。
 
-| 夜读主题 | 欢迎页 |
+| Windows 夜读 | Windows 欢迎页 |
 |---|---|
 | ![夜读](docs/night.png) | ![欢迎](docs/welcome.png) |
+
+| Android 纸黄 | Android 夜读 |
+|---|---|
+| <img src="docs/android-reading.png" width="260" alt="Android 纸黄"> | <img src="docs/android-night.png" width="260" alt="Android 夜读"> |
 
 ![快捷键](docs/shortcuts.png)
 

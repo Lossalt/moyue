@@ -10,6 +10,8 @@
 - 自动记住上次的书、阅读位置和排版设置
 - 通过系统文件选择器（SAF）打开 EPUB，不需要存储权限
 
+<img src="../docs/android-reading.png" width="300" alt="Android 阅读界面">
+
 ## 构建
 
 不需要 Gradle 和 Android Studio。需要：
